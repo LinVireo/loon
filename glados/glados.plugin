@@ -14,13 +14,14 @@
 cookies = input,"",tag=Cookie 池(可选兽底),desc=留空则自动使用 MITM 收集的账号池; 手填时多账号用 & 分隔
 notify = switch,true,tag=推送签到结果
 delay = input,3,type=number,tag=账号间隔(秒),desc=防风控, 建议 >=3
+exchange = select,"off","plan100","plan200","plan500",tag=自动兑换,desc=积分达门槛自动兑换(plan100=100分·10天 etc); off 关闭。门槛后自动 POST /api/user/exchange; 默认 off 仅签到
 force = switch,false,tag=忽略今日已签记录,desc=开启后每次运行都重新签到
 ua = input,"",tag=自定义 UA(可选),desc=默认 Windows Chrome; 需与领 Cookie 时的登录设备一致, 否则风控 device-mismatch
 
 [Script]
 request if ${url} ~= /^https:\/\/glados[-a-z.]*\/api\/user\//i then script("https://cdn.jsdelivr.net/gh/noxenys/loon@main/glados/glados-cookie.js") with tag="GLaDOS Cookie 收集", timeout=10
-cron "0 30 7,21 * * *" then script("https://cdn.jsdelivr.net/gh/noxenys/loon@main/glados/glados.js", {${cookies}, ${notify}, ${delay}, ${force}, ${ua}}) with tag="GLaDOS 每日签到", timeout=600, enable=true
-generic then script("https://cdn.jsdelivr.net/gh/noxenys/loon@main/glados/glados.js", {${cookies}, ${notify}, ${delay}, ${force}, ${ua}}) with tag="GLaDOS 手动签到", img_url="checkmark.seal", timeout=600
+cron "0 30 7,21 * * *" then script("https://cdn.jsdelivr.net/gh/noxenys/loon@main/glados/glados.js", {${cookies}, ${notify}, ${delay}, ${force}, ${ua}, ${exchange}}) with tag="GLaDOS 每日签到", timeout=600, enable=true
+generic then script("https://cdn.jsdelivr.net/gh/noxenys/loon@main/glados/glados.js", {${cookies}, ${notify}, ${delay}, ${force}, ${ua}, ${exchange}}) with tag="GLaDOS 手动签到", img_url="checkmark.seal", timeout=600
 
 [Mitm]
 hostname = glados.rocks, glados.network, glados.one, glados.space, glados.cloud, glados.vip, glados-facility.com

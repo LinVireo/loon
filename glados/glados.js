@@ -21,6 +21,8 @@ var DEFAULT_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 // 服务端风控: checkin 校验 UA 平台与登录设备一致性 (code:4 device-mismatch)。cookie 在哪台设备拿的, UA 就用那台的。
 var RETRY = 1; // 网络/5xx 自动补打一次
+var ARG = {}; // main 里赋值; maybeExchange 用
+var EXCHANGE_POINTS = { plan100: 100, plan200: 200, plan500: 500 }; // 门槛(实测生态语义: 积分→天数)
 
 // ---------- 参数解析 ----------
 
@@ -177,10 +179,39 @@ function getPoolAccounts() {
   });
 }
 
+function maybeExchange(r) {
+  var plan = ARG.exchange;
+  if (!plan || plan === 'off' || !EXCHANGE_POINTS[plan]) return Promise.resolve(r);
+  if (r.state !== 'ok' && r.state !== 'dup') return Promise.resolve(r);
+  var origin = 'https://' + r.acc.domain;
+  var referer = origin + '/console/checkin';
+  function req(method, path, body) {
+    var headers = baseHeaders(r.acc.cookie, r.acc.ua || ARG.ua || '', body ? { 'Content-Type': 'application/json;charset=UTF-8' } : null);
+    headers.Referer = referer; headers.Origin = origin;
+    var o = { url: origin + path, method: method, headers: headers, timeout: 20 };
+    if (body) o.body = JSON.stringify(body);
+    return fetchJSON(o);
+  }
+  return req('GET', '/api/user/points').then(function (p) {
+    if (p.status !== 200) { r.exchange = 'points HTTP ' + p.status; return r; }
+    var balance = parseFloat(dig(p.data, 'points'));
+    if (isNaN(balance)) { r.exchange = 'points \u5b57\u6bb5\u5f02\u5e38, \u76ee\u6807 ' + plan; return r; }
+    r.points = balance;
+    if (balance < EXCHANGE_POINTS[plan]) { r.exchange = plan + ' \u4f59\u989d ' + balance + '/' + EXCHANGE_POINTS[plan] + ' \u4e0d\u8db3, \u672a\u5151\u6362'; return r; }
+    return req('POST', '/api/user/exchange', { planType: plan }).then(function (e) {
+      var code = dig(e.data, 'code');
+      var msg = dig(e.data, 'message') || '';
+      r.exchange = (code === 0 ? '\u2713 ' : '\u2717 code' + code + ' ') + plan + ' ' + msg + ' (' + balance + ')';
+      return r;
+    });
+  });
+}
+
 // ---------- 主流程 ----------
 
 function main() {
   var arg = parseArg($argument);
+  ARG = arg;
   var force = arg.force === true || arg.force === 'true';
   var doNotify = !(arg.notify === false || arg.notify === 'false');
   var delaySec = Number(arg.delay);
@@ -221,7 +252,7 @@ function main() {
     chain = chain
       .then(function () { if (i > 0) return sleep(delaySec * 1000); })
       .then(function () { return runAccount(acc, acc.ua || arg.ua || ''); })
-      .then(function (r) { console.log('[' + acc.mask + '] ' + r.state + ' ' + r.detail); results.push(r); });
+      .then(function (r) { console.log('[' + acc.mask + '] ' + r.state + ' ' + r.detail); results.push(r); return maybeExchange(r); });
   });
 
   chain.then(function () {
@@ -234,6 +265,9 @@ function main() {
     results.forEach(function (r) {
       var mark = r.state === 'ok' ? '✅' : r.state === 'dup' ? '⏭' : r.state === 'expired' || r.state === 'bad' ? '🚫' : '❌';
       lines.push(mark + ' ' + r.acc.mask + ' ' + r.detail);
+    });
+    results.forEach(function (r) {
+      if (r.exchange) lines.push('[兑换] ' + r.acc.mask + ' ' + r.exchange);
     });
     $persistentStore.write(
       JSON.stringify({ date: today, done: true, summary: summary, at: now.toISOString() }),

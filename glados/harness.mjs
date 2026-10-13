@@ -229,6 +229,36 @@ async function t8_poolPriority() {
   return bag;
 }
 
+// ---- T9: 自动兑换 (points 达门槛 → exchange) ----
+async function t9_exchange() {
+  console.log('T9 自动兑换: 余额≥门槛才发 exchange / off 不发');
+  const bag = [], notes = [], store = new Map(); const calls = [];
+  const rt0 = makeRuntime({ notes, store, fetchFn: (req) => calls.push(req) });
+  const { rt, donePromise } = rt0;
+  rt.$task.fetch = (req) => {
+    calls.push(req);
+    if (req.url.includes('/status')) return Promise.resolve(resp(200, { code: 0, data: { leftDays: '5.0' } }));
+    if (req.url.includes('/points')) return Promise.resolve(resp(200, { code: 0, points: '120.0000', history: [] }));
+    if (req.url.includes('/exchange')) return Promise.resolve(resp(200, { code: 0, points: 0, message: 'Exchange successful', list: [] }));
+    return Promise.resolve(resp(200, { code: 1, message: 'obs', list: [] }));
+  };
+  rt.$argument = { cookies: 'gld:sess=gld_EX; gld:sess.sig=E', notify: true, delay: 0, exchange: 'plan100' };
+  runScript(rt); await donePromise;
+  const ex = calls.filter((x) => x.url.includes('/exchange'));
+  eq(ex.length, 1, 'T9 达门槛发 1 次 exchange', bag);
+  eq(ex[0]?.body, JSON.stringify({ planType: 'plan100' }), 'T9 exchange body planType', bag);
+  eq((notes[0]?.b || '').includes('[兑换]'), true, 'T9 通知兑换行', bag);
+  eq((notes[0]?.b || '').includes('plan100'), true, 'T9 兑换计入 plan', bag);
+
+  // off: 不发 points/exchange
+  const calls2 = [];
+  const r2 = makeRuntime({ notes: [], store: new Map(), fetchFn: (req) => { calls2.push(req); return Promise.resolve(resp(200, { code: 1, message: 'obs', data: { leftDays: '1.0' }, list: [] })); } });
+  r2.rt.$argument = { cookies: 'gld:sess=gld_EX; gld:sess.sig=E', notify: false, delay: 0, exchange: 'off' };
+  runScript(r2.rt); await r2.donePromise;
+  eq(calls2.filter((x) => x.url.includes('/exchange') || x.url.includes('/points')).length, 0, 'T9 off 不发 points/exchange', bag);
+  return bag;
+}
+
 // ---- live ----
 async function live(file, statusOnly) {
   const raw = fs.readFileSync(file, 'utf8');
@@ -258,7 +288,7 @@ if (mode === '--live' || mode === '--live-status') {
   await live(process.argv[3], mode === '--live-status');
 } else {
   const results = [];
-  for (const t of [t1_noCookie, t2_mixed, t3_skipSameDay, t4_force, t5_badFormat, t6_realMatrix, t7_collector, t8_poolPriority]) {
+  for (const t of [t1_noCookie, t2_mixed, t3_skipSameDay, t4_force, t5_badFormat, t6_realMatrix, t7_collector, t8_poolPriority, t9_exchange]) {
     results.push({ t: t.name, fails: await t() });
   }
   const allFail = results.flatMap((r) => r.fails);
