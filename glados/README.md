@@ -6,7 +6,7 @@
 
 1. 装**插件**:
    ```
-   https://raw.githubusercontent.com/noxenys/loon/main/glados/glados.plugin
+   https://raw.githubusercontent.com/LinVireo/loon/main/glados/glados.plugin
    ```
    插件自带 `[Mitm] hostname` 7 个 GLaDOS 域名（自动合并进主配置）。
 2. **Loon 里装并完全信任 MITM 证书**（设置→MITM→证书; 若已装过可跳过）
