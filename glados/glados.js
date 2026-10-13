@@ -132,6 +132,7 @@ function runAccount(acc, ua, note) {
     headers.Origin = origin;
     var req = { url: url, method: method, headers: headers, timeout: 20 };
     if (extra && extra.body != null) req.body = extra.body;
+    req['auto-redirect'] = false; // POST 不跟随重定向(生态惯例; 302 视为异常随时终止)
     return fetchJSON(req).then(function (res) {
       if ((res.status === 0 || res.status >= 500) && RETRY > 0) {
         return sleep(4000).then(function () { return fetchJSON(req); });
@@ -242,7 +243,7 @@ function main() {
 
   function finish(lines, skipped) {
     if (lines && lines.length && doNotify) {
-      $notification.post(lines[0], lines[1] || '', lines.slice(2).join('\n'));
+      $notification.post(lines[0], lines[1] || '', lines.slice(2).join('\n'), { openUrl: 'https://glados.rocks/console/checkin' });
     }
     console.log(JSON.stringify(skipped || lines));
     $done();
