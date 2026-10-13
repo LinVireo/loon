@@ -2,7 +2,7 @@
 #!desc = GLaDOS 多账号每日签到 (cron + 手动入口); Cookie 池用 & 分隔, 账号可加 domain@ 前缀指定主站, 其余粘贴浏览器完整 Cookie
 #!author = noxenys
 #!homepage = https://github.com/noxenys/loon
-#!icon = https://raw.githubusercontent.com/noxenys/loon/main/glados/icon.png
+#!icon = https://cdn.jsdelivr.net/gh/noxenys/loon@main/glados/icon.png
 #!system = iOS,iPadOS,macOS
 #!system_version = 15
 #!loon_version = 3.5.1(983)
@@ -18,9 +18,9 @@ force = switch,false,tag=忽略今日已签记录,desc=开启后每次运行都�
 ua = input,"",tag=自定义 UA(可选),desc=默认 Windows Chrome; 需与领 Cookie 时的登录设备一致, 否则风控 device-mismatch
 
 [Script]
-request if ${url} ~= /^https:\/\/glados[-a-z.]*\/api\/user\//i then script("https://raw.githubusercontent.com/noxenys/loon/main/glados/glados-cookie.js") with tag="GLaDOS Cookie 收集", timeout=10
-cron "0 30 7,21 * * *" then script("https://raw.githubusercontent.com/noxenys/loon/main/glados/glados.js", {${cookies}, ${notify}, ${delay}, ${force}, ${ua}}) with tag="GLaDOS 每日签到", timeout=600, enable=true
-generic then script("https://raw.githubusercontent.com/noxenys/loon/main/glados/glados.js", {${cookies}, ${notify}, ${delay}, ${force}, ${ua}}) with tag="GLaDOS 手动签到", img_url="checkmark.seal", timeout=600
+request if ${url} ~= /^https:\/\/glados[-a-z.]*\/api\/user\//i then script("https://cdn.jsdelivr.net/gh/noxenys/loon@main/glados/glados-cookie.js") with tag="GLaDOS Cookie 收集", timeout=10
+cron "0 30 7,21 * * *" then script("https://cdn.jsdelivr.net/gh/noxenys/loon@main/glados/glados.js", {${cookies}, ${notify}, ${delay}, ${force}, ${ua}}) with tag="GLaDOS 每日签到", timeout=600, enable=true
+generic then script("https://cdn.jsdelivr.net/gh/noxenys/loon@main/glados/glados.js", {${cookies}, ${notify}, ${delay}, ${force}, ${ua}}) with tag="GLaDOS 手动签到", img_url="checkmark.seal", timeout=600
 
 [Mitm]
 hostname = glados.rocks, glados.network, glados.one, glados.space, glados.cloud, glados.vip, glados-facility.com
