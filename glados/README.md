@@ -1,39 +1,50 @@
-# GLaDOS 签到 (Loon 多账号)
+# GLaDOS 签到 (Loon 多账号 · 自动收集 Cookie)
 
-cron 定时 + generic 手动双入口; 纯 `$task.fetch` 轮询, **无需 MitM**。跑在 Script v2 (Loon 3.5.1(983)+, 目标设备 3.5.2(1005))。
+分 MINI 双脚本范式: **`glados-cookie.js` 收集器**（MITM 劫持登录请求, 抓 Cookie+UA 自动建账号池）+ **`glados.js` 签到**（cron 定时 + generic 手动）。免手动复制 Cookie; Cookie 只存本机 Loon 键值存储, 不上报。
 
-## 安装
+## 安装（3 步）
 
-```
-https://raw.githubusercontent.com/noxenys/loon/main/glados/glados.plugin
-```
+1. 装**插件**:
+   ```
+   https://raw.githubusercontent.com/noxenys/loon/main/glados/glados.plugin
+   ```
+   插件自带 `[Mitm] hostname` 7 个 GLaDOS 域名（自动合并进主配置）。
+2. **Loon 里装并完全信任 MITM 证书**（设置→MITM→证书; 若已装过可跳过）
+3. **手机浏览器登录一次任意 GLaDOS 主站**（Safari 打开 `glados.rocks` 登录即可）:
+   - 打开后任意 `/api/user/*` 请求触发收集器 → 通知 "GLaDOS Cookie 已入库 第 N 个账号"
+   - **多账号** = 不同域名/不同浏览器各登录一次（自动去重, 上限 20）
+   - 之后每天 cron 07:30 / 21:30 自动签到, 面板可手动跑
 
-1. Loon → 插件 → 添加 → 填上面 URL
-2. 编辑 `[Argument]`:
-   - **Cookie 池** (`&` 分隔多账号): 浏览器登录 glados.rocks → F12 → Application → Cookies → 复制**完整 Cookie 串**(必须含 `gld:sess=`/`koa:sess=` 及对应 `.sig=`; 2026-10 实测键名为 `gld:sess`)
-   - 多账号格式: `cookie1&cookie2`, 或给某号指定域名 `glados.network@cookie3`
-   - 通知/间隔(秒)/强制重跑 开关
-3. 手动: Loon 首页面板 "GLaDOS 手动签到"
+## 运行机制（实测 2026-10-13, 设备 3.5.2(1005)）
 
-## 验证(改完脚本/配置后, 不用碰 Loon)
+| 事实 | 值 |
+| --- | --- |
+| Cookie 键名 | **`gld:sess=` + `gld:sess.sig=`**（旧生态 `koa:sess` 已过期, 双键兼容）|
+| 判定矩阵 | `code:0`=成功(message 形如 "Checkin! Got N Points") · `code:1`=今日已签 · `code:4`+`reason:"device-mismatch"`=**UA 与登录设备不符** · HTTP 401/403=失效 |
+| 风控 | checkin 校验 **UA 平台与登录设备一致性** → 收集器同时抓 UA, 池内每账号绑定自己的 UA（手机登录·手机签到天然一致, 这是手填 cookie 方案做不到的）|
+| 字段路径 | `data.leftDays`(字符串数字)/`data.traffic`(字节) **实际平铺无 list 包装** |
+| 域名 | 7 个: rocks/network/one/space/cloud/vip/facility.com; **rocks 直连最稳**（nginx 直出）; token 统一 `glados.one` 实测可用 |
+| 当日防重 | `$persistentStore` 记当天汇总, 二次运行短路; `force` 开关强制补签 |
+
+## 本机无头验证（改任何东西后, 不用碰手机）
 
 ```bash
-node harness.mjs --mock            # 5 场景 20 断言 (逻辑层, 零网络)
-node tools/validate.mjs            # 官方解析器校验插件语法 (v2 静态规则)
-# 真接口 (可选; cookie 文件不进 git):
-node harness.mjs --live-status acc.txt   # 只验 cookie 活性, 不真正签到
-node harness.mjs --live acc.txt          # 完整链路 (checkin 幂等, 已签=“已签到”)
-acc.txt 每行一个账号, 同 Cookie 池格式。
+node harness.mjs --mock          # 8 场景(收集器+池优先+判定矩阵...) 全部断言, 零网络
+node tools/validate.mjs          # 官方解析器 + Script v2 静态规则(3 行脚本/MitM/参数引用)
+node harness.mjs --live acc.txt  # 真接口(账号池文本, 每行一个, 已 gitignore)
 ```
-
-## 真机 30 秒清单
-
-导入后: ①插件页无红字/参数表单出现 4 项 → ②填 Cookie 池 → ③首页面板手动跑 → ④出 "GLaDOS 签到 / N成M重…" 通知 → ⑤插件日志看到逐账号 `[mask] state detail` 即全通。
 
 ## 文件
 
-- `glados.js` — 主脚本 (无 Loon 外依赖)
-- `glados.plugin` — 插件声明 ([Argument] 类型化 + 2 行 [Script] v2)
-- `harness.mjs` — Loon Script API 的 Node 无头测试台 (mock/live)
-- `tools/validate.mjs` — 官方 loon-legacy-converter 打底 + script_v2 静态规则
-- `tools/vendor/` — 上游 nsloon.app 转换器源码快照 (2026-10-10)
+- `glados.js` — 签到脚本（池优先, 手填兼容兜底）
+- `glados-cookie.js` — MITM 收集器（request 劫持, 去重建池）
+- `glados.plugin` — 插件（[Argument] 类型化 + 3 行 [Script] v2 + [MitM] 7 域名）
+- `harness.mjs` — Loon Script API 无头测试台（mock/live 双模式）
+- `tools/validate.mjs` + `tools/vendor/` — 官方转换器源码快照 (2026-10-10)
+- `tools/probe.mjs` — 风控侦察脚本（device-mismatch 发现行）
+
+## 红线
+
+- `acc*.txt` 永不进 git（.gitignore 排除）
+- 收集器/签到脚本**无任何上报逻辑**, Cookie 只落本机
+- 若通知出现 "UA 与登录设备不符": 该账号在别的设备登录的 → 编辑插件参数「自定义 UA」为登录时设备 UA, 或重开收集

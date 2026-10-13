@@ -33,9 +33,10 @@ function makeRuntime({ notes, store, fetchFn }) {
   return { rt, donePromise };
 }
 
-async function runScript(rt) {
-  const fn = new Function('$argument', '$task', '$persistentStore', '$notification', '$done', 'console', SCRIPT);
-  return fn(rt.$argument, rt.$task, rt.$persistentStore, rt.$notification, rt.$done, rt.console);
+async function runScript(rt, scriptFile, extra) {
+  const code = fs.readFileSync(new URL(scriptFile || './glados.js', import.meta.url), 'utf8');
+  const fn = new Function('$argument', '$task', '$persistentStore', '$notification', '$done', 'console', '$request', '$response', code);
+  return fn(rt.$argument, rt.$task, rt.$persistentStore, rt.$notification, rt.$done, rt.console, extra?.request, extra?.response);
 }
 
 const resp = (status, body) => ({ statusCode: status, body: typeof body === 'string' ? body : JSON.stringify(body) });
@@ -170,6 +171,64 @@ async function t6_realMatrix() {
   return bag;
 }
 
+
+// ---- T7: MITM 收集器 (glados-cookie.js) ----
+async function t7_collector() {
+  console.log('T7 Cookie 收集器: 新号入库+通知 / 重复刷新不通知 / 无sess静默');
+  const bag = [], notes = [], store = new Map();
+  const run = (request) => { const { rt, donePromise } = makeRuntime({ notes, store, fetchFn: () => Promise.resolve(resp(200, '{}')) });
+    return runScript(rt, './glados-cookie.js', { request }).then(() => donePromise); };
+  const H = (ck, ua) => ({ Cookie: ck, 'User-Agent': ua });
+  const ck1 = 'gld:sess=gld_AAA111; gld:sess.sig=SIG1';
+  const ck2 = 'gld:sess=gld_BBB222; gld:sess.sig=SIG2';
+  await run({ url: 'https://glados.rocks/api/user/status', headers: H(ck1, 'iPhoneUA') });
+  let pool = JSON.parse(store.get('glados_pool'));
+  eq(pool.length, 1, 'T7 首次入库 1 条', bag);
+  eq(pool[0].domain, 'glados.rocks', 'T7 域名提取', bag);
+  eq(pool[0].ua, 'iPhoneUA', 'T7 UA 绑定', bag);
+  eq(notes.length, 1, 'T7 新号有通知', bag);
+  await run({ url: 'https://glados.rocks/api/user/status', headers: H(ck1, 'NewUA') });
+  pool = JSON.parse(store.get('glados_pool'));
+  eq(pool.length, 1, 'T7 重复凭据不扩池', bag);
+  eq(pool[0].ua, 'NewUA', 'T7 重复时刷新 UA', bag);
+  eq(notes.length, 1, 'T7 重复无重复通知', bag);
+  await run({ url: 'https://glados.space/api/user/status', headers: H(ck2, 'SpaceUA') });
+  pool = JSON.parse(store.get('glados_pool'));
+  eq(pool.length, 2, 'T7 第二账号(不同域名)入库, 共 2', bag);
+  eq(pool.find((x) => x.domain === 'glados.space').ua, 'SpaceUA', 'T7 space UA', bag);
+  const before = fetchCallCount(store);
+  await run({ url: 'https://glados.rocks/console/index', headers: { Cookie: 'other=x' } });
+  eq(JSON.parse(store.get('glados_pool')).length, 2, 'T7 无 sess 凭据不入池', bag);
+  return bag;
+}
+let _ccc = 0; const fetchCallCount = () => ++_ccc; // 占位: 无网络调用断言走池长度
+
+// ---- T8: 池优先 (MITM 池 > Argument) ----
+async function t8_poolPriority() {
+  console.log('T8 池优先: store 有池 -> 用池账号(含各自 UA), 忽略 argument');
+  const bag = [], notes = [], store = new Map();
+  const seenUA = [];
+  const { rt, donePromise } = makeRuntime({
+    notes, store,
+    fetchFn: (req) => {
+      if (req.url.includes('/status')) { seenUA.push({ ua: req.headers['User-Agent'], c: req.headers.Cookie }); return Promise.resolve(resp(200, { code: 0, data: { leftDays: '5.0' } })); }
+      return Promise.resolve(resp(200, { code: 1, message: 'obs', list: [] }));
+    },
+  });
+  store.set('glados_pool', JSON.stringify([
+    { id: 'x1', cookie: 'gld:sess=gld_POOL1; gld:sess.sig=P1', ua: 'POOL-UA-1', domain: 'glados.rocks' },
+    { id: 'x2', cookie: 'gld:sess=gld_POOL2; gld:sess.sig=P2', ua: 'POOL-UA-2', domain: 'glados.network' },
+  ]));
+  rt.$argument = { cookies: 'koa:sess=MANUAL; koa:sess.sig=m', notify: true, delay: 0 };
+  runScript(rt); await donePromise;
+  eq(seenUA.length, 2, 'T8 用池的 2 个账号(非 argument)', bag);
+  eq(seenUA[0].ua, 'POOL-UA-1', 'T8 账号1 用池 UA', bag);
+  eq(seenUA[1].ua, 'POOL-UA-2', 'T8 账号2 用池 UA', bag);
+  const note = notes[0];
+  eq(note.s.split(' / ')[1], '2 \u4e2a\u8d26\u53f7', 'T8 汇总 2 账号', bag);
+  return bag;
+}
+
 // ---- live ----
 async function live(file, statusOnly) {
   const raw = fs.readFileSync(file, 'utf8');
@@ -199,7 +258,7 @@ if (mode === '--live' || mode === '--live-status') {
   await live(process.argv[3], mode === '--live-status');
 } else {
   const results = [];
-  for (const t of [t1_noCookie, t2_mixed, t3_skipSameDay, t4_force, t5_badFormat, t6_realMatrix]) {
+  for (const t of [t1_noCookie, t2_mixed, t3_skipSameDay, t4_force, t5_badFormat, t6_realMatrix, t7_collector, t8_poolPriority]) {
     results.push({ t: t.name, fails: await t() });
   }
   const allFail = results.flatMap((r) => r.fails);

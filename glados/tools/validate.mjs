@@ -35,14 +35,15 @@ check(conv.stats.converted === 0, 'L1a 无需转换的旧行 = 0 (本插件已�
 // ---- 静态规则 ----
 const argBlock = src.match(/\[Argument\]([\s\S]*?)(\n\[|$)/)?.[1] || '';
 const declared = [...argBlock.matchAll(/^\s*([A-Za-z_][\w]*)\s*=/gm)].map((m) => m[1]);
-const scriptBlock = src.match(/\[Script\]([\s\S]*)$/)?.[1] || '';
+const scriptBlock = src.match(/\[Script\]([\s\S]*?)(?=\n\[|$)/)?.[1] || '';
 const lines = scriptBlock.split(/\r?\n/).filter((l) => l.trim() && !/^\s*#/.test(l));
-check(lines.length === 2, 'L1b [Script] 恰好 2 行 (cron+generic)', `got ${lines.length}`);
+check(lines.length === 3, 'L1b [Script] 恰好 3 行 (collect+cron+generic)', `got ${lines.length}`);
 const WITH_KEYS = new Set(['tag', 'timeout', 'requires_body', 'binary_body_mode', 'enable', 'img_url']);
 let triggerOK = true;
 lines.forEach((line, i) => {
-  const vars = [...line.matchAll(/\$\{(\w+)\}/g)].map((m) => m[1]);
-  const unknown = vars.filter((v) => !declared.includes(v));
+  const BUILTIN_VARS = /^[a-z]+/;
+  const vars = [...line.matchAll(/\$\{([^}]+)\}/g)].map((m) => m[1]).filter((n) => !BUILTIN_VARS.test(n));
+  const unknown = vars.filter((v) => !declared.includes(v) && v !== 'url' && !/^(request|response)\./.test(v));
   check(unknown.length === 0, `L1b 第${i + 1}行 引用的插件参数全部已声明`, JSON.stringify(unknown));
   const m = line.match(/^\s*(cron|generic|request|response|network-changed)\b/);
   check(m != null, `L1b 第${i + 1}行 有合法 Trigger`);

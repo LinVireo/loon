@@ -160,6 +160,23 @@ function runAccount(acc, ua, note) {
   });
 }
 
+function getPoolAccounts() {
+  var pool = [];
+  try { pool = JSON.parse($persistentStore.read('glados_pool') || '[]') || []; } catch (e) { pool = []; }
+  if (!Array.isArray(pool)) return [];
+  return pool.filter(function (x) { return x && x.cookie; }).map(function (x) {
+    var m = x.cookie.match(/(?:gld|koa):sess=([^;]+)/i);
+    var id = m ? m[1].replace(/\s+/g, '').slice(0, 10) : '?';
+    return {
+      domain: (x.domain || DEFAULT_DOMAIN).toLowerCase(),
+      cookie: x.cookie,
+      ua: x.ua || '',
+      mask: id + '…',
+      badFormat: !/(?:gld|koa):sess\s*=/i.test(x.cookie),
+    };
+  });
+}
+
 // ---------- 主流程 ----------
 
 function main() {
@@ -169,7 +186,9 @@ function main() {
   var delaySec = Number(arg.delay);
   if (!isFinite(delaySec) || delaySec < 0) delaySec = 3;
 
-  var accounts = parseAccounts(arg.cookies);
+  var poolAccs = getPoolAccounts();
+  var manualAccs = parseAccounts(arg.cookies);
+  var accounts = poolAccs.length ? poolAccs : manualAccs; // MITM 自动治集池优先, 手填仅兽底
 
   function finish(lines, skipped) {
     if (lines && lines.length && doNotify) {
@@ -180,7 +199,7 @@ function main() {
   }
 
   if (!accounts.length) {
-    return finish(['GLaDOS 签到', '未配置', '请编辑插件 [Argument] 填入 Cookie 池 (多账号用 & 分隔)']);
+    return finish(['GLaDOS 签到', '未配置', '手机登录一次 glados 网页 (MITM 自动收 Cookie), 或在插件参数手填 Cookie 池']);
   }
 
   var now = new Date();
@@ -201,7 +220,7 @@ function main() {
   accounts.forEach(function (acc, i) {
     chain = chain
       .then(function () { if (i > 0) return sleep(delaySec * 1000); })
-      .then(function () { return runAccount(acc, arg.ua || ''); })
+      .then(function () { return runAccount(acc, acc.ua || arg.ua || ''); })
       .then(function (r) { console.log('[' + acc.mask + '] ' + r.state + ' ' + r.detail); results.push(r); });
   });
 
