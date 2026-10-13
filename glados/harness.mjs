@@ -259,6 +259,70 @@ async function t9_exchange() {
   return bag;
 }
 
+// ---- T10: JSON 数组多账号(生态主流格式) + 备注名展示 ----
+async function t10_jsonArray() {
+  console.log('T10 JSON 数组多账号: [{cookie,ua,domain,name}] 入池顺序/备注名/多域名');
+  const bag = [], notes = [], store = new Map(); const seen = [];
+  const { rt, donePromise } = makeRuntime({
+    notes, store,
+    fetchFn: (req) => {
+      if (req.url.includes('/status')) { seen.push(req.headers['User-Agent']); return Promise.resolve(resp(200, { code: 0, data: { leftDays: '9.0' } })); }
+      return Promise.resolve(resp(200, { code: 1, message: 'obs', list: [] }));
+    },
+  });
+  rt.$argument = { cookies: JSON.stringify([
+    { cookie: 'gld:sess=gld_MAIN1; gld:sess.sig=M1', name: '主号', domain: 'glados.rocks' },
+    { cookie: 'gld:sess=gld_ALT1; gld:sess.sig=A1', name: '小号', domain: 'glados.network', ua: 'AltUA/1.0' },
+  ]), notify: true, delay: 0 };
+  runScript(rt); await donePromise;
+  eq(seen[1] !== 'POOL', true && seen.includes('AltUA/1.0'), 'T10 JSON 内 ua 生效', bag);
+  const b = notes[0]?.b || '';
+  eq(b.includes('主号'), true, 'T10 备注名替代掩码', bag);
+  eq(b.includes('小号'), true, 'T10 第二备注', bag);
+  eq(notes[0]?.s.includes(' / 2 个账号'), true, 'T10 两账号', bag);
+  return bag;
+}
+
+// ---- T11: 连续 3 次失效自动停号 + force/刷新恢复 ----
+async function t11_failsAutoStop() {
+  console.log('T11 连续失效≥3 -> paused(不发请求) 不计入 fails; force -> 重试并恢复');
+  const bag = [], notes = [], store = new Map();
+  let all = [];
+  const R = (o) => (((o.rt && Promise.resolve(1))) && 0) || (async () => { runScript(o.rt); await o.donePromise; })();
+  const mk = () => makeRuntime({ notes, store, fetchFn: (req) => {
+    all.push(req.url);
+    if (req.url.includes('/status')) return Promise.resolve(resp(401, { message: 'unauthorized' }));
+    return Promise.resolve(resp(200, { code: 0, message: 'ok' }));
+  } });
+  const a1 = mk();
+  a1.rt.$argument = { cookies: 'koa:sess=BAD1; koa:sess.sig=1', notify: false, delay: 0, force: true };
+  runScript(a1.rt); await a1.donePromise;
+  const failsAfter = JSON.parse(store.get('glados_fails'));
+  eq(Object.values(failsAfter)[0] === 1, true, 'T11 401 失败计数 +1: ' + JSON.stringify(failsAfter), bag);
+  const a2 = mk();
+  a2.rt.$argument = { cookies: 'koa:sess=BAD1; koa:sess.sig=1', notify: false, delay: 0, force: true };
+  runScript(a2.rt); await a2.donePromise;
+  const a3 = mk();
+  a3.rt.$argument = { cookies: 'koa:sess=BAD1; koa:sess.sig=1', notify: false, delay: 0, force: true };
+  runScript(a3.rt); await a3.donePromise;
+  const cnt3 = Object.values(JSON.parse(store.get('glados_fails')))[0];
+  eq(cnt3 === 3, true, 'T11 计数达 3: ' + JSON.stringify(store.get('glados_fails')), bag);
+  const before = all.length;
+  store.delete('glados_last_run'); // 模拟次日 (跨日时 fail 计数跨日保留)
+  const a4 = mk();
+  a4.rt.$argument = { cookies: 'koa:sess=BAD1; koa:sess.sig=1', notify: true, delay: 0, force: false };
+  runScript(a4.rt); await a4.donePromise;
+  eq(all.length === before, true, 'T11 第 4 次自动停号不发请求', bag);
+  eq(notes.some(n => (n.b || '').includes('已暂停')), true, 'T11 停号通知', bag);
+  const a5 = mk();
+  a5.rt.$argument = { cookies: 'koa:sess=BAD1; koa:sess.sig=1', notify: false, delay: 0, force: true };
+  runScript(a5.rt); await a5.donePromise;
+  eq(all.length > before, true, 'T11 force 仍可强制重试', bag);
+  const f4 = JSON.parse(store.get('glados_fails'))['BAD1'];
+  eq(f4 >= 4, true, 'T11 force 重试亦计失败 (' + f4 + ')', bag);
+  return bag;
+}
+
 // ---- live ----
 async function live(file, statusOnly) {
   const raw = fs.readFileSync(file, 'utf8');
@@ -288,7 +352,7 @@ if (mode === '--live' || mode === '--live-status') {
   await live(process.argv[3], mode === '--live-status');
 } else {
   const results = [];
-  for (const t of [t1_noCookie, t2_mixed, t3_skipSameDay, t4_force, t5_badFormat, t6_realMatrix, t7_collector, t8_poolPriority, t9_exchange]) {
+  for (const t of [t1_noCookie, t2_mixed, t3_skipSameDay, t4_force, t5_badFormat, t6_realMatrix, t7_collector, t8_poolPriority, t9_exchange, t10_jsonArray, t11_failsAutoStop]) {
     results.push({ t: t.name, fails: await t() });
   }
   const allFail = results.flatMap((r) => r.fails);
