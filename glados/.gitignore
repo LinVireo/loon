@@ -1,0 +1,4 @@
+# 真实凭据绝不入库
+acc*.txt
+*.secret
+.tools-store.json
